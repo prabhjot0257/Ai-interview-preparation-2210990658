@@ -40,7 +40,7 @@ router.post(
         interview.questions.push(q._id);
         await interview.save();
       } catch (aiErr) {
-        console.warn('AI generation failed:', aiErr.message);
+        // console.warn('AI generation failed:', aiErr.message);
       }
 
       res.json({ interview });
