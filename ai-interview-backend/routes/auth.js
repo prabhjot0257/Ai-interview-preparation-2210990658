@@ -38,8 +38,8 @@ router.post('/login', loginValidator, async (req, res, next) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 
-    const payload = { id: user._id };
-    const token = jwt.sign(payload, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
     res.json({ token: `Bearer ${token}`, user: { id: user._id, name: user.name, email: user.email } });
   } catch (err) {
     next(err);

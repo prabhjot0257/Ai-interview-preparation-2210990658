@@ -10,7 +10,7 @@ const { generateQuestion } = require('../utils/openai');
  * POST /api/interviews
  * body: { topic, difficulty }
  * Protected: user
- * Creates interview and generates first question via OpenAI (if API key present)
+ * Creates interview and generates first question via AI
  */
 router.post(
   '/',
@@ -25,7 +25,7 @@ router.post(
       });
       await interview.save();
 
-      // Generate initial AI question (best-effort)
+      // Generate initial AI question
       try {
         const { questionText, idealAnswer } = await generateQuestion(topic, difficulty);
         const q = new Question({
@@ -40,10 +40,12 @@ router.post(
         interview.questions.push(q._id);
         await interview.save();
       } catch (aiErr) {
-        // console.warn('AI generation failed:', aiErr.message);
+        console.warn('⚠️ AI generation failed:', aiErr.message);
       }
 
-      res.json({ interview });
+     
+      const populatedInterview = await Interview.findById(interview._id).populate('questions');
+      res.json({ interview: populatedInterview });
     } catch (err) {
       next(err);
     }

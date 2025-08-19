@@ -1,69 +1,115 @@
-const axios = require('axios');
+const axios = require("axios");
 
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-if (!OPENAI_KEY) {
-  console.warn('OPENAI_API_KEY not set - AI endpoints will return errors until provided');
+const GROQ_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL = "llama3-8b-8192"; // free Groq model
+
+if (!GROQ_KEY) {
+  console.warn("⚠️ GROQ_API_KEY not set - AI endpoints will fail.");
 }
 
-const callOpenAI = async (messages, temperature = 0.2, max_tokens = 800) => {
-  if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY not configured');
+/**
+ * Generate a question + ideal answer using Groq LLaMA
+ */
+const generateQuestion = async (topic, difficulty) => {
+  if (!GROQ_KEY) throw new Error("No GROQ_API_KEY provided");
+
+  const prompt = `Generate ONE ${difficulty} technical interview question about "${topic}". 
+Also provide a short ideal answer. 
+Respond ONLY in JSON like this:
+{
+  "question": "your interview question here",
+  "ideal_answer": "your short ideal answer here"
+}`;
+
   const resp = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
+    "https://api.groq.com/openai/v1/chat/completions",
     {
-      model: OPENAI_MODEL,
-      messages,
-      temperature,
-      max_tokens
+      model: GROQ_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      max_tokens: 500
     },
     {
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${OPENAI_KEY}`
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${GROQ_KEY}`
       }
     }
   );
-  return resp.data;
-};
 
-/**
- * Generate a single interview question (and ideal answer)
- * returns { questionText, idealAnswer }
- */
-const generateQuestion = async (topic, difficulty) => {
-  const system = `You are an expert technical interviewer. Only produce interview-related content. Do not answer unrelated requests.`;
-  const user = `Generate ONE ${difficulty} interview question about "${topic}". Also provide a concise ideal answer/explanation. Respond as a JSON object only with keys: question, ideal_answer. Keep answers short (under 200 words).`;
-  const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
+  const text = resp.data.choices[0].message.content.trim();
 
-  const data = await callOpenAI(messages, 0.2, 600);
-  const text = data.choices?.[0]?.message?.content || '';
-  // try to parse JSON if returned JSON; otherwise return as text
+  let parsed;
   try {
-    const parsed = JSON.parse(text);
-    return { questionText: parsed.question || parsed.question_text || text, idealAnswer: parsed.ideal_answer || parsed.idealAnswer || '' };
+    parsed = JSON.parse(text); // 👈 Agar proper JSON mila
   } catch (e) {
-    // fallback: crude split
-    return { questionText: text, idealAnswer: '' };
+    // 👇 Agar JSON galat hai to regex se extract kar lo
+    const qMatch = text.match(/question["']?\s*:\s*["']([^"']+)["']/i);
+    const aMatch = text.match(/ideal_answer["']?\s*:\s*["']([^"']+)["']/i);
+    parsed = {
+      question: qMatch ? qMatch[1] : text,
+      ideal_answer: aMatch ? aMatch[1] : ""
+    };
   }
+
+  return {
+    questionText: parsed.question || "No question generated",
+    idealAnswer: parsed.ideal_answer || ""
+  };
 };
 
 /**
- * Grade an answer using the AI. Returns { score:0-10, feedback: "..." }
+ * Grade user answer using Groq LLaMA
  */
 const gradeAnswer = async (questionText, idealAnswer, userAnswer) => {
-  const system = `You are an objective grading assistant for technical interview answers. Score from 0 to 10 and give short feedback. Respond only as JSON: {"score": <number>, "feedback": "<...>"} .`;
-  const user = `Question: ${questionText}\nIdeal answer: ${idealAnswer}\nUser's answer: ${userAnswer}\nGive score and feedback in JSON.`;
-  const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
+  if (!GROQ_KEY) throw new Error("No GROQ_API_KEY provided");
 
-  const data = await callOpenAI(messages, 0.0, 500);
-  const text = data.choices?.[0]?.message?.content || '';
+  const prompt = `Question: ${questionText}
+Ideal Answer: ${idealAnswer}
+User Answer: ${userAnswer}
+
+Grade this from 0-10 with short feedback. 
+Respond ONLY in JSON like this:
+{
+  "score": 8,
+  "feedback": "your feedback here"
+}`;
+
+  const resp = await axios.post(
+    "https://api.groq.com/openai/v1/chat/completions",
+    {
+      model: GROQ_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.2,
+      max_tokens: 300
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${GROQ_KEY}`
+      }
+    }
+  );
+
+  const text = resp.data.choices[0].message.content.trim();
+
+  let parsed;
   try {
-    const parsed = JSON.parse(text);
-    return { score: parsed.score, feedback: parsed.feedback };
+    parsed = JSON.parse(text); // 👈 Agar valid JSON mila
   } catch (e) {
-    // fallback: return null and full text as feedback
-    return { score: null, feedback: text };
+    // 👇 fallback parsing
+    const scoreMatch = text.match(/score["']?\s*:\s*([0-9]+)/i);
+    const feedbackMatch = text.match(/feedback["']?\s*:\s*["']([^"']+)["']/i);
+    parsed = {
+      score: scoreMatch ? parseInt(scoreMatch[1]) : null,
+      feedback: feedbackMatch ? feedbackMatch[1] : text
+    };
   }
+
+  return {
+    score: parsed.score !== undefined ? parsed.score : null,
+    feedback: parsed.feedback || "No feedback generated"
+  };
 };
 
 module.exports = { generateQuestion, gradeAnswer };
