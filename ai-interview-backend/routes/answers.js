@@ -4,7 +4,8 @@ const router = express.Router();
 
 const Answer = require('../models/Answer');
 const Question = require('../models/Question');
-const { gradeAnswer } = require('../utils/openai');
+const Interview = require('../models/Interview');
+const { gradeAnswer, generateQuestion } = require('../utils/openai');
 
 /**
  * POST /api/answers
@@ -17,6 +18,7 @@ router.post(
   async (req, res, next) => {
     try {
       const { interviewId, questionId, userResponse } = req.body;
+
       const question = await Question.findById(questionId);
       if (!question) return res.status(404).json({ message: 'Question not found' });
 
@@ -27,22 +29,59 @@ router.post(
         userResponse
       });
 
-      // Optionally grade via AI if API key present
+      // Grade answer via AI
       try {
         const grade = await gradeAnswer(question.questionText, question.idealAnswer || '', userResponse);
         if (grade && typeof grade.score === 'number') {
           answerDoc.score = grade.score;
           answerDoc.feedback = grade.feedback;
         } else {
-          // if score missing, put feedback text
           answerDoc.feedback = grade.feedback || '';
         }
       } catch (aiErr) {
-        // console.warn('AI grading failed:', aiErr.message);
+        console.warn('⚠️ AI grading failed:', aiErr.message);
       }
 
       await answerDoc.save();
-      res.json({ answer: answerDoc });
+
+      // Check interview progress
+      const interview = await Interview.findById(interviewId).populate('questions');
+
+      const answeredCount = await Answer.countDocuments({ interview: interviewId, user: req.user._id });
+
+      let nextQuestion = null;
+
+      if (answeredCount < 5) {
+        // Generate a unique next question
+        const previousQuestionsText = interview.questions.map(q => q.questionText).join('\n');
+        const { questionText, idealAnswer } = await generateQuestion(interview.topic, interview.difficulty, previousQuestionsText);
+
+        const q = new Question({
+          interview: interview._id,
+          questionText,
+          generatedBy: 'AI',
+          topic: interview.topic,
+          difficulty: interview.difficulty,
+          idealAnswer
+        });
+
+        await q.save();
+        interview.questions.push(q._id);
+        await interview.save();
+
+        nextQuestion = q;
+      }
+
+      if (answeredCount >= 5) {
+        interview.status = 'completed';
+        await interview.save();
+      }
+
+      res.json({
+        answer: answerDoc,
+        interviewStatus: interview.status,
+        nextQuestion
+      });
     } catch (err) {
       next(err);
     }
@@ -50,7 +89,8 @@ router.post(
 );
 
 /**
- * GET /api/answers/user - returns user's answers
+ * GET /api/answers/user
+ * Get all answers of the logged-in user
  */
 router.get(
   '/user',

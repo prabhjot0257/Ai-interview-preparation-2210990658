@@ -10,4 +10,14 @@ const QuestionSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// Virtual populate for answers
+QuestionSchema.virtual('answers', {
+  ref: 'Answer',         // model to populate
+  localField: '_id',     // Question._id
+  foreignField: 'question' // Answer.question
+});
+
+QuestionSchema.set('toObject', { virtuals: true });
+QuestionSchema.set('toJSON', { virtuals: true });
+
 module.exports = mongoose.model('Question', QuestionSchema);

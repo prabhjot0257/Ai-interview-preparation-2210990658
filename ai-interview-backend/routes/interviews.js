@@ -25,7 +25,7 @@ router.post(
       });
       await interview.save();
 
-      // Generate initial AI question
+      // Generate the first question
       try {
         const { questionText, idealAnswer } = await generateQuestion(topic, difficulty);
         const q = new Question({
@@ -37,13 +37,15 @@ router.post(
           idealAnswer
         });
         await q.save();
-        interview.questions.push(q._id);
-        await interview.save();
+
+        await Interview.updateOne(
+          { _id: interview._id },
+          { $push: { questions: q._id } }
+        );
       } catch (aiErr) {
         console.warn('⚠️ AI generation failed:', aiErr.message);
       }
 
-     
       const populatedInterview = await Interview.findById(interview._id).populate('questions');
       res.json({ interview: populatedInterview });
     } catch (err) {
@@ -54,7 +56,6 @@ router.post(
 
 /**
  * GET /api/interviews
- * Protected: user - returns user's interviews
  */
 router.get(
   '/',
@@ -71,20 +72,48 @@ router.get(
 
 /**
  * GET /api/interviews/:id
+ * Protected: user
+ * Returns interview with questions and their answers
  */
 router.get(
   '/:id',
   passport.authenticate('jwt', { session: false }),
   async (req, res, next) => {
     try {
-      const interview = await Interview.findById(req.params.id).populate('questions');
+      const interview = await Interview.findById(req.params.id)
+        .populate({
+          path: 'questions',
+          populate: {
+            path: 'answers',            // populate answers for each question
+            match: { user: req.user._id } // only current user’s answers
+          }
+        });
+
       if (!interview) return res.status(404).json({ message: 'Not found' });
-      if (String(interview.user) !== String(req.user._id)) return res.status(403).json({ message: 'Forbidden' });
-      res.json({ interview });
+      if (String(interview.user) !== String(req.user._id)) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+
+      // Optional: calculate performance summary
+      const totalQuestions = interview.questions.length;
+      const answeredCount = interview.questions.filter(q => q.answers.length > 0).length;
+      const totalScore = interview.questions.reduce((acc, q) => {
+        if (q.answers[0]?.score != null) return acc + q.answers[0].score;
+        return acc;
+      }, 0);
+
+      const score = totalQuestions > 0 ? (totalScore / totalQuestions).toFixed(2) : null;
+
+      res.json({ 
+        interview, 
+        performance: { totalQuestions, answeredCount, score } 
+      });
     } catch (err) {
       next(err);
     }
   }
 );
+
+
 
 module.exports = router;
