@@ -34,6 +34,8 @@ app.use('/api/interviews', interviewRoutes);
 app.use('/api/questions', questionRoutes);
 app.use('/api/answers', answerRoutes);
 app.use('/api/ai', aiRoutes);
+app.use("/api/analytics", require("./routes/analytics"));
+
 
 // Error handler
 app.use(errorHandler);
