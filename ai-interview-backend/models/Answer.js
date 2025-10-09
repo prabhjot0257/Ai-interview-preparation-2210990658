@@ -11,3 +11,5 @@ const AnswerSchema = new mongoose.Schema({
 });
 
 module.exports = mongoose.model('Answer', AnswerSchema);
+
+
